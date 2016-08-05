@@ -87,11 +87,11 @@ func TestPrivateKeyEncrypt(t *testing.T) {
 		passphrase := "password"
 		err = privKey.Encrypt([]byte(passphrase))
 		if err != nil {
-			t.Error("%s encrypt private key failed", err.Error())
+			t.Errorf("%s encrypt private key failed", err.Error())
 		}
 		err = privKey.Decrypt([]byte(passphrase))
 		if err != nil {
-			t.Error("%s decrypt private key failed", err.Error())
+			t.Errorf("%s decrypt private key failed", err.Error())
 		}
 	}
 }
