@@ -11,6 +11,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/sha1"
+	"encoding/hex"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"math/big"
@@ -154,12 +156,14 @@ func (pk *PrivateKey) Serialize(w io.Writer) (err error) {
 		err = errors.InvalidArgumentError("unknown private key type")
 	}
 	if err != nil {
+		fmt.Println(err.Error())
 		return
 	}
 
 	ptype := packetTypePrivateKey
 	contents := buf.Bytes()
 	privateKeyBytes := privateKeyBuf.Bytes()
+	fmt.Printf("privateKeyBytes :%x\n", privateKeyBytes)
 	if pk.IsSubkey {
 		ptype = packetTypePrivateSubkey
 	}
@@ -213,6 +217,32 @@ func serializeECDSAPrivateKey(w io.Writer, priv *ecdsa.PrivateKey) error {
 	return writeBig(w, priv.D)
 }
 
+func (pk *PrivateKey) Encrypt(passphrase []byte) error {
+	buf := bytes.NewBuffer(nil)
+	pk.Serialize(buf)
+	privateKeyBytes, err := hex.DecodeString("03fc0e9a45bb6a8584bb18282cfd39d99f250d7d05ad81b82455b380200b376de866e298139a6d64e52244d8e45786e125281bfbc1c3fb677f666290382258f6ca5a9764f423aa52e23c7bad7266575adc9753dff0442da28741e9d728162cd408126374c9a5336e398f2cf8a7d383e4ae9137be9be1cc6dc8a6ebea00904d89e5790200cc19c564eb6f9ca1f6266fcf8edad04be8e6d53ee61b2124928700aa322ae88c6ecfdd69c78e75d6bf44524a3c0df776865bacb4eb4957a183dff32ce5971a790200e5987c55693c5d9b5dbe60b532d99c440f73e868ebf98ace758ecb3d50bd8c24ddd8dda66ad1e1ccedff645965ec9ab5683adb56c9aecff10aee773be9b2ac170200c335485de2a7a87f4f152dd579fd5bd5753ea3736eb609385626798031cd3f330133202da9336d4c594273fe6e52b039df8814bbc731a4453f5b953a0cd7bf25667a6a6c1db5b1a38e8b488fe867c30502215ba9")
+	privateKeyBytes = buf.Bytes()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("encrypt privateKeyBytes : %d %x\n", len(privateKeyBytes), privateKeyBytes)
+
+	//pk.iv = make([]byte, pk.cipher.blockSize())
+	//rand.Read(pk.iv)
+	key := make([]byte, pk.cipher.KeySize())
+	pk.s2k(key, passphrase)
+	u := new(big.Int).ModInverse(pk.PrivateKey.(*rsa.PrivateKey).Primes[0], pk.PrivateKey.(*rsa.PrivateKey).Primes[1])
+	fmt.Printf("encrypt u :  %x\n", u)
+
+	block := pk.cipher.new(key)
+	cfb := cipher.NewCFBEncrypter(block, pk.iv)
+
+	pk.encryptedData = make([]byte, len(privateKeyBytes))
+	cfb.XORKeyStream(pk.encryptedData, privateKeyBytes)
+	pk.Encrypted = true
+	return nil
+}
+
 // Decrypt decrypts an encrypted private key using a passphrase.
 func (pk *PrivateKey) Decrypt(passphrase []byte) error {
 	if !pk.Encrypted {
@@ -227,6 +257,7 @@ func (pk *PrivateKey) Decrypt(passphrase []byte) error {
 	data := make([]byte, len(pk.encryptedData))
 	cfb.XORKeyStream(data, pk.encryptedData)
 
+	fmt.Printf("decrypted data : %d %x\n", len(data), data)
 	if pk.sha1Checksum {
 		if len(data) < sha1.Size {
 			return errors.StructuralError("truncated private key data")
@@ -234,6 +265,7 @@ func (pk *PrivateKey) Decrypt(passphrase []byte) error {
 		h := sha1.New()
 		h.Write(data[:len(data)-sha1.Size])
 		sum := h.Sum(nil)
+		fmt.Printf("decrypted checksum : %x\n", data[len(data)-sha1.Size:])
 		if !bytes.Equal(sum, data[len(data)-sha1.Size:]) {
 			return errors.StructuralError("private key checksum failure")
 		}
@@ -277,14 +309,17 @@ func (pk *PrivateKey) parseRSAPrivateKey(data []byte) (err error) {
 
 	buf := bytes.NewBuffer(data)
 	d, _, err := readMPI(buf)
+	fmt.Printf("d: %x\n", d)
 	if err != nil {
 		return
 	}
 	p, _, err := readMPI(buf)
+	fmt.Printf("p: %x\n", p)
 	if err != nil {
 		return
 	}
 	q, _, err := readMPI(buf)
+	fmt.Printf("q: %x\n", q)
 	if err != nil {
 		return
 	}
@@ -297,6 +332,7 @@ func (pk *PrivateKey) parseRSAPrivateKey(data []byte) (err error) {
 		return err
 	}
 	rsaPriv.Precompute()
+
 	pk.PrivateKey = rsaPriv
 	pk.Encrypted = false
 	pk.encryptedData = nil
