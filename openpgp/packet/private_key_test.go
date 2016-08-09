@@ -96,6 +96,43 @@ func TestPrivateKeyEncrypt(t *testing.T) {
 	}
 }
 
+func TestSerializePGP(t *testing.T) {
+	for i, test := range privateKeyTests {
+		packet, err := Read(readerFromHex(test.privateKeyHex))
+		if err != nil {
+			t.Errorf("#%d: failed to parse: %s", i, err)
+			continue
+		}
+
+		privKey := packet.(*PrivateKey)
+		buf := bytes.NewBuffer(nil)
+		err = privKey.SerializePGP(buf)
+
+		packet2, err := Read(buf)
+		privKey = packet2.(*PrivateKey)
+		err = privKey.Decrypt([]byte("testing"))
+		if err != nil {
+			t.Errorf("#%d: failed to decrypt1: %s", i, err)
+			continue
+		}
+		err = privKey.Encrypt([]byte("testing2"))
+		if err != nil {
+			t.Errorf("#%d: failed to encrypt2: %s", i, err)
+			continue
+		}
+		err = privKey.Decrypt([]byte("testing3"))
+		if err == nil {
+			t.Errorf("#%d: failed to decrypt2: %s", i, err)
+			continue
+		}
+		err = privKey.Decrypt([]byte("testing2"))
+		if err != nil {
+			t.Errorf("#%d: failed to decrypt2: %s", i, err)
+			continue
+		}
+	}
+}
+
 func populateHash(hashFunc crypto.Hash, msg []byte) (hash.Hash, error) {
 	h := hashFunc.New()
 	if _, err := h.Write(msg); err != nil {
