@@ -525,35 +525,20 @@ func NewEntity(name, comment, email string, config *packet.Config) (*Entity, err
 	return e, nil
 }
 
-// SerializePrivate serializes an Entity, including private key material, to
-// the given Writer. For now, it must only be used on an Entity returned from
-// NewEntity.
+// SerializePrivateWithoutSign serializes an Entity, including private key material, to
+// the given Writer. For now, it should be called after SelfSign or a Deserialized Entity.
 // If config is nil, sensible defaults will be used.
-func (e *Entity) SerializePrivate(w io.Writer, config *packet.Config) (err error) {
+func (e *Entity) SerializePrivateWithoutSign(w io.Writer) (err error) {
 	err = e.PrivateKey.Serialize(w)
 	if err != nil {
 		return
 	}
-	for _, ident := range e.Identities {
-		err = ident.UserId.Serialize(w)
-		if err != nil {
-			return
-		}
-		err = ident.SelfSignature.SignUserId(ident.UserId.Id, e.PrimaryKey, e.PrivateKey, config)
-		if err != nil {
-			return
-		}
-		err = ident.SelfSignature.Serialize(w)
-		if err != nil {
-			return
-		}
+	err = e.serializeIdentities(w)
+	if err != nil {
+		return err
 	}
 	for _, subkey := range e.Subkeys {
 		err = subkey.PrivateKey.Serialize(w)
-		if err != nil {
-			return
-		}
-		err = subkey.Sig.SignKey(subkey.PublicKey, e.PrivateKey, config)
 		if err != nil {
 			return
 		}
@@ -565,6 +550,39 @@ func (e *Entity) SerializePrivate(w io.Writer, config *packet.Config) (err error
 	return nil
 }
 
+// SelfSign sign an Entity, on both Identities and Subkeys
+func (e *Entity) SelfSign(config *packet.Config) (err error) {
+	for _, ident := range e.Identities {
+		err = ident.SelfSignature.SignUserId(ident.UserId.Id, e.PrimaryKey, e.PrivateKey, config)
+		if err != nil {
+			return
+		}
+	}
+	for _, subkey := range e.Subkeys {
+		err = subkey.Sig.SignKey(subkey.PublicKey, e.PrivateKey, config)
+		if err != nil {
+			return
+		}
+	}
+	return nil
+}
+
+// SerializePrivate serializes an Entity, including private key material, to
+// the given Writer. For now, it must only be used on an Entity returned from
+// NewEntity.
+// If config is nil, sensible defaults will be used.
+func (e *Entity) SerializePrivate(w io.Writer, config *packet.Config) (err error) {
+	err = e.SelfSign(config)
+	if err != nil {
+		return
+	}
+	err = e.SerializePrivateWithoutSign(w)
+	if err != nil {
+		return
+	}
+	return nil
+}
+
 // Serialize writes the public part of the given Entity to w. (No private
 // key material will be output).
 func (e *Entity) Serialize(w io.Writer) error {
@@ -572,6 +590,24 @@ func (e *Entity) Serialize(w io.Writer) error {
 	if err != nil {
 		return err
 	}
+	err = e.serializeIdentities(w)
+	if err != nil {
+		return err
+	}
+	for _, subkey := range e.Subkeys {
+		err = subkey.PublicKey.Serialize(w)
+		if err != nil {
+			return err
+		}
+		err = subkey.Sig.Serialize(w)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *Entity) serializeIdentities(w io.Writer) (err error) {
 	for _, ident := range e.Identities {
 		err = ident.UserId.Serialize(w)
 		if err != nil {
@@ -588,17 +624,7 @@ func (e *Entity) Serialize(w io.Writer) error {
 			}
 		}
 	}
-	for _, subkey := range e.Subkeys {
-		err = subkey.PublicKey.Serialize(w)
-		if err != nil {
-			return err
-		}
-		err = subkey.Sig.Serialize(w)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return
 }
 
 // SignIdentity adds a signature to e, from signer, attesting that identity is

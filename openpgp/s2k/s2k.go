@@ -20,6 +20,10 @@ import (
 // values. Currently, Config is used only by the Serialize function in
 // this package.
 type Config struct {
+	// S2KMode is the mode of s2k function.
+	// It can be 0 (simple), 1(salted), 3(iterated)
+	// 2(reserved) 100-110(private/experimental).
+	S2KMode uint8
 	// Hash is the default hash function to be used. If
 	// nil, SHA1 is used.
 	Hash crypto.Hash
@@ -43,6 +47,10 @@ func (c *Config) hash() crypto.Hash {
 	}
 
 	return c.Hash
+}
+
+func (c *Config) EncodedCount() uint8 {
+	return c.encodedCount()
 }
 
 func (c *Config) encodedCount() uint8 {
@@ -151,9 +159,14 @@ func Iterated(out []byte, h hash.Hash, in []byte, salt []byte, count int) {
 	}
 }
 
+func Parse(r io.Reader) (f func(out, in []byte), err error) {
+	f, _, _, err = Parse2(r)
+	return
+}
+
 // Parse reads a binary specification for a string-to-key transformation from r
 // and returns a function which performs that transform.
-func Parse(r io.Reader) (f func(out, in []byte), err error) {
+func Parse2(r io.Reader) (f func(out, in []byte), salt []byte, config Config, err error) {
 	var buf [9]byte
 
 	_, err = io.ReadFull(r, buf[:2])
@@ -163,41 +176,47 @@ func Parse(r io.Reader) (f func(out, in []byte), err error) {
 
 	hash, ok := HashIdToHash(buf[1])
 	if !ok {
-		return nil, errors.UnsupportedError("hash for S2K function: " + strconv.Itoa(int(buf[1])))
+		err = errors.UnsupportedError("hash for S2K function: " + strconv.Itoa(int(buf[1])))
+		return
 	}
 	if !hash.Available() {
-		return nil, errors.UnsupportedError("hash not available: " + strconv.Itoa(int(hash)))
+		err = errors.UnsupportedError("hash not available: " + strconv.Itoa(int(hash)))
+		return
 	}
+	config.Hash = hash
 	h := hash.New()
-
-	switch buf[0] {
+	config.S2KMode = buf[0]
+	switch config.S2KMode {
 	case 0:
-		f := func(out, in []byte) {
+		f = func(out, in []byte) {
 			Simple(out, h, in)
 		}
-		return f, nil
+		return
 	case 1:
 		_, err = io.ReadFull(r, buf[:8])
 		if err != nil {
 			return
 		}
-		f := func(out, in []byte) {
+		f = func(out, in []byte) {
 			Salted(out, h, in, buf[:8])
 		}
-		return f, nil
+		salt = buf[:8]
+		return
 	case 3:
 		_, err = io.ReadFull(r, buf[:9])
 		if err != nil {
 			return
 		}
-		count := decodeCount(buf[8])
-		f := func(out, in []byte) {
-			Iterated(out, h, in, buf[:8], count)
+		config.S2KCount = decodeCount(buf[8])
+		f = func(out, in []byte) {
+			Iterated(out, h, in, buf[:8], config.S2KCount)
 		}
-		return f, nil
+		salt = buf[:8]
+		return
 	}
 
-	return nil, errors.UnsupportedError("S2K function")
+	err = errors.UnsupportedError("S2K function")
+	return
 }
 
 // Serialize salts and stretches the given passphrase and writes the
