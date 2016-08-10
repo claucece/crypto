@@ -103,13 +103,7 @@ func TestSerializePGP(t *testing.T) {
 			t.Errorf("#%d: failed to parse: %s", i, err)
 			continue
 		}
-
 		privKey := packet.(*PrivateKey)
-		buf := bytes.NewBuffer(nil)
-		err = privKey.SerializePGP(buf)
-
-		packet2, err := Read(buf)
-		privKey = packet2.(*PrivateKey)
 		err = privKey.Decrypt([]byte("testing"))
 		if err != nil {
 			t.Errorf("#%d: failed to decrypt1: %s", i, err)
@@ -120,14 +114,34 @@ func TestSerializePGP(t *testing.T) {
 			t.Errorf("#%d: failed to encrypt2: %s", i, err)
 			continue
 		}
-		err = privKey.Decrypt([]byte("testing3"))
+
+		buf := bytes.NewBuffer(nil)
+		err = privKey.Serialize(buf)
+
+		packet2, err := Read(buf)
+		privKey2 := packet2.(*PrivateKey)
+		if !privKey2.Encrypted {
+			t.Errorf("#%d: privKey2 should be encrypted", i)
+			continue
+		}
+		err = privKey2.Decrypt([]byte("testingx"))
 		if err == nil {
+			t.Errorf("#%d: failed to decryptx: %s", i, err)
+			continue
+		}
+		err = privKey2.Decrypt([]byte("testing2"))
+		if err != nil {
 			t.Errorf("#%d: failed to decrypt2: %s", i, err)
 			continue
 		}
-		err = privKey.Decrypt([]byte("testing2"))
-		if err != nil {
-			t.Errorf("#%d: failed to decrypt2: %s", i, err)
+
+		buf = bytes.NewBuffer(nil)
+		err = privKey2.Serialize(buf)
+
+		packet3, err := Read(buf)
+		privKey3 := packet3.(*PrivateKey)
+		if privKey3.Encrypted {
+			t.Errorf("#%d: privKey3 should not be encrypted", i)
 			continue
 		}
 	}
